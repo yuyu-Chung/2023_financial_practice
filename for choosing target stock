@@ -1,0 +1,122 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sat May 20 14:48:16 2023
+
+@author: user
+
+很久沒練習寫coding了，根據個人理財需要，練習寫的選股程式，要感謝大仁哥跟小卷，陪我撐過在桃園的歲月，今天腦筋裡才會記得這些東西，勉強慢慢拼湊慢慢寫出來。
+選股邏輯 : 將所有台灣上市公司全部做篩選，篩選條件 : 1.最近一日收盤價 < 單股四年內平均收盤價-標準差；2.MA5 > MA20；3.yahooquery.Ticker.financial_data，經由yahoo財經系統推薦可買賣名單。4.憑直覺看有沒有緣分要不要買。
+執行策略 : 至台灣證卷交易所網站自動下載台股公司清冊，並將它自動轉存在寫程式的資料夾中，然後讀入pandas模式庫，借用yfinance抓取個股資料
+          將符合條件的標的，借用matplotlib繪圖出來參考看看感覺喜不喜歡。
+驗證方式 : 將最後output結果，用google搜尋進入yahoo股市對應股票曲線圖是否一致，檢查一致即表示程式邏輯正確。經檢驗一致。
+"""
+
+# selenium 自動操作瀏覽器模式庫；shutil 移動檔案位置的模式庫；yahooquery 好像yfinance支援的功能無法用了，網路上建議用yahooquery，操作方式與yfinance相似。
+
+from selenium import webdriver
+import time
+import shutil 
+import pandas as pd
+import yfinance as yf
+import yahooquery as yq
+import matplotlib
+import matplotlib.pyplot as plt
+
+# matplotlib原始設定不支援用中文，透過method rc 重新設定，文字類型參考matplotlib.font_manager.get_font_names()。
+
+matplotlib.rc("font", family="Microsoft JhengHei", size=10)
+
+
+def search_data():
+    # 自動瀏覽器設定
+    driver = webdriver.Chrome()
+    # 自動聯網至標的網站
+    driver.get('https://data.gov.tw/dataset/18419')
+    # 鎖定要擊點的位置
+    button = driver.find_element_by_xpath("/html/body/div/div/div/main/div/div[2]/div[2]/div[2]/div[2]/div[2]/div/div[1]/a/button")
+    # 自動點入
+    button.click()
+    # 休息一下下載資料，以利後面操作
+    time.sleep(15)
+
+    # 自動移動檔案至標的資料夾
+    shutil.move(r"C:\Users\user\Downloads\t187ap03_L.csv", r"D:\coding-journey\practice")
+
+
+    # 設定要選取的欄位
+    usecols = ["公司代號", "公司簡稱", "英文簡稱"]
+
+    # 讀取csv檔，順便擷取需要資料即可
+    df = pd.read_csv("t187ap03_L.csv", usecols=usecols)
+    
+    return df
+
+def all_stock(df):
+    # 製作公司名稱清冊以便投入yfinance
+    stock_list = []
+    for elem in df["公司代號"]:
+        stock_list.append(str(elem)+".TW")
+    
+    return stock_list
+
+#先將所有上市股票過濾，若經yahooquery評等可買，返回過濾後清單
+def fin_filter(stock_list):
+    fin_filter_list = []
+    for dot in stock_list:
+        fin = yq.Ticker(dot)
+        earn = fin.financial_data
+        recom = earn[dot]['recommendationKey']
+        if recom == "buy":
+            fin_filter_list.append(dot)
+        elif recom == "strong_buy":
+            fin_filter_list.append(dot)
+        else:
+            pass
+    
+    return fin_filter_list        
+    
+#經財經過濾後的股票清單，再篩選出今日股價<平均股價-標準差；MA5 > MA20。
+def price_filter(fin_filter_list, df):
+    # 將需要的資料全部抓取、製作出來，存在篩選後清單內                            
+    for coco in fin_filter_list:
+        stock = yf.Ticker(coco)
+        data = stock.history(period="4y" )
+        price = data.Close
+        average = price.mean()
+        std = price.std()
+        MA5 = price.rolling(5).mean()
+        MA20 = price.rolling(20).mean()
+    
+    
+        ave_list = []
+        for count in price.index:
+          ave_list.append(average)
+    
+        mony_list_uper = []
+        for uper in price.index:
+          mony_list_uper.append(average+std)
+    
+        mony_list_low = []
+        for low in price.index:
+            mony_list_low.append(average-std)
+        
+        #print((coco.translate({ord(letter): None for letter in '.TW'})))   
+        Series = (df.index[df["公司代號"] == int(coco.translate({ord(letter): None for letter in '.TW'}))])
+        if price.iloc[-1] < average-std and MA5.iloc[-1] > MA20.iloc[-1] and Series.empty != True :        
+            plt.plot(price, color="blue")
+            plt.plot(price.index, ave_list, color="red")
+            plt.plot(price.index, mony_list_uper, "--", color="yellow")
+            plt.plot(price.index, mony_list_low, "--", color="yellow")
+            plt.plot(MA5, color="orange")
+            plt.plot(MA20, color="pink")
+            for row in Series:
+                plt.title(df.loc[row, "公司簡稱"], size=20)        
+                plt.grid()
+                plt.show()
+   
+    
+df = search_data()
+stock_list = all_stock(df)
+fin_filter_list = fin_filter(stock_list)
+result = price_filter(fin_filter_list, df)
+
